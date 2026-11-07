@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "windows-terminal-vm"
-version = "0.2.0"
+version = "0.3.0"
 description = "A separate Windows desktop for your agents, inside your terminal."
 readme = "README.md"
 requires-python = ">=3.11"

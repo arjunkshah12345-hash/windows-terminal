@@ -39,8 +39,8 @@ class BiosBootTests(unittest.TestCase):
         command = self.manager.command("windows")
         self.assertEqual(command[command.index("-machine") + 1], "pc")
         self.assertNotIn("if=pflash", " ".join(command))
-        self.assertIn("ide-cd,drive=install,bus=ide.1", command)
-        self.assertIn("ide-hd,drive=osdisk,bus=ide.0", command)
+        self.assertIn("ide-cd,drive=install,bus=ide.1,bootindex=1", command)
+        self.assertIn("ide-hd,drive=osdisk,bus=ide.0,bootindex=0", command)
         self.assertNotIn("usb-kbd", command)
         self.assertIn("restrict=on", command[command.index("-netdev") + 1])
 

@@ -29,6 +29,17 @@ def parser():
     init.add_argument("--network", choices=["isolated", "nat"], default="isolated", help="isolated blocks external connectivity; nat enables guest internet and host/LAN access")
     init.add_argument("--tpm", action="store_true", help="Provide TPM 2.0 with swtpm (needed for Windows 11)")
     init.add_argument("--boot", choices=["uefi", "bios"], default="uefi", help="bios: legacy SeaBIOS + IDE for older x86 guests (Windows 7 and earlier, ReactOS)")
+    init.add_argument("--unattended", action="store_true", help="Hands-free install: attach an autounattend.xml that wipes the VM disk and creates a local account")
+    init.add_argument("--user", default="agent", help="Local account for --unattended (default: agent)")
+    init.add_argument("--password", help="Password for --unattended (default: read $WINDOWS_TERMINAL_PASSWORD, else prompt)")
+    init.add_argument("--edition", default="Windows 11 Pro", help="Image name to install with --unattended")
+    fetch = commands.add_parser("fetch", help="Download genuine Windows 11 from Microsoft and build a bootable ISO")
+    fetch.add_argument("--arch", choices=["aarch64", "x86_64"], default="aarch64" if platform.machine().lower() in {"arm64", "aarch64"} else "x86_64")
+    fetch.add_argument("--language", default="en-us", help="Media language code, e.g. en-us, en-gb, de-de")
+    fetch.add_argument("--edition", default="Windows 11 Pro", help="Image to put on the ISO (Windows 11 Pro or Windows 11 Home)")
+    fetch.add_argument("--out", type=Path, default=Path("."), help="Directory for the ISO (default: current directory)")
+    fetch.add_argument("--setup-only", action="store_true", help="Boot media only (~0.9 GB): real Windows PE + Setup, cannot install")
+    fetch.add_argument("--keep-download", action="store_true", help="Keep the 4.5 GB ESD after building the ISO")
     for command, help_text in [("up", "Start a configured VM"), ("down", "Request guest shutdown"), ("status", "Show VM status"), ("view", "Watch and control the guest in your terminal"), ("screenshot", "Save a PNG of the real guest display"), ("click", "Click a guest pixel"), ("move", "Move the guest pointer"), ("type", "Type US-layout ASCII into the guest"), ("key", "Send a key chord, e.g. win+r"), ("scroll", "Scroll in the guest"), ("mcp", "Serve computer-use tools over MCP stdio"), ("command", "Print the generated QEMU command as JSON"), ("eject", "Eject the installation ISO from the running VM")]:
         sub = commands.add_parser(command, help=help_text)
         sub.add_argument("--vm", default=os.environ.get("WINDOWS_TERMINAL_VM") or "windows", metavar="NAME")
@@ -79,12 +90,73 @@ def detached(manager, name):
     return None
 
 
+def fetched_media(iso):
+    """ISOs built by `fetch` boot with efisys_noprompt.bin and need no key."""
+    try:
+        with open(iso, "rb") as stream:
+            stream.seek(16 * 2048 + 40)
+            return stream.read(32).startswith(b"WT_WIN11")
+    except OSError:
+        return False
+
+
+def press_boot_key(computer, seconds=12.0):
+    """Microsoft ISOs wait for "Press any key to boot from CD or DVD"; answer it on a blank disk only."""
+    import time
+    print("Blank disk: answering the installer's \"Press any key to boot from CD\" prompt…", file=sys.stderr)
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            computer.key("enter")
+        except (OSError, QMPError):
+            pass
+        time.sleep(0.5)
+
+
+def fetch_media(args):
+    from . import media
+    out = args.out.expanduser().resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    say = lambda message: print(f"\r\033[K{message}", end="" if "%" in message else "\n", file=sys.stderr, flush=True)
+    family = "Professional"  # consumer ESD: Home, Home Single Language, Pro
+    entry = media.catalog(args.arch, args.language, family)
+    say(f"Microsoft catalog: {entry['name']} ({entry['size'] / 1e9:.1f} GB, SHA-1 {entry['sha1'][:12]}…)")
+    media.check_space(entry, out, args.setup_only)
+    esd = (media.download_setup_only(entry, out / (entry["name"] + ".setup"), say) if args.setup_only
+           else media.download(entry, out / entry["name"], say))
+    suffix = "setup" if args.setup_only else args.edition.lower().replace("windows ", "win").replace(" ", "-")
+    build = ".".join(entry["name"].split(".")[:2])  # e.g. 26100.4349
+    iso = out / f"win11-{build}-{'arm64' if args.arch == 'aarch64' else 'x64'}-{suffix}.iso"
+    media.build_iso(esd, iso, args.edition, args.setup_only, say, delete_esd=not args.keep_download)
+    return {"iso": str(iso), "size": iso.stat().st_size, "source": entry["url"], "verified": "per-chunk WIM integrity table + per-file SHA-1" if args.setup_only else f"SHA-1 {entry['sha1']} (Microsoft catalog)",
+            "setup_only": args.setup_only,
+            "next": f"windows-terminal init --iso {iso} --arch {args.arch} --tpm" + ("" if args.setup_only else " --unattended")}
+
+
 def run(args):
     if args.command == "doctor":
-        return {"host": platform.system(), "architecture": platform.machine(), "python": platform.python_version(), "qemu_aarch64": shutil.which("qemu-system-aarch64"), "qemu_x86_64": shutil.which("qemu-system-x86_64"), "qemu_img": shutil.which("qemu-img"), "swtpm": shutil.which("swtpm"), "graphics": detect_protocol(), "guest_installed": "Use status --vm NAME to inspect a configured guest.", "next": "Install QEMU if missing; supply a matching Windows ISO with init --iso PATH. Windows is not bundled."}
+        return {"host": platform.system(), "architecture": platform.machine(), "python": platform.python_version(), "qemu_aarch64": shutil.which("qemu-system-aarch64"), "qemu_x86_64": shutil.which("qemu-system-x86_64"), "qemu_img": shutil.which("qemu-img"), "swtpm": shutil.which("swtpm"), "wimlib": shutil.which("wimlib-imagex"), "xorriso": shutil.which("xorriso"), "graphics": detect_protocol(), "guest_installed": "Use status --vm NAME to inspect a configured guest.", "next": "Install QEMU if missing. Get Windows with `fetch` (needs wimlib + xorriso) or bring your own ISO, then init --iso PATH."}
     manager = VMManager(root=args.root)
+    if args.command == "fetch":
+        return fetch_media(args)
     if args.command == "init":
-        return manager.create(VMConfig(name=args.name, arch=args.arch, memory_mb=args.memory, cpus=args.cpus, disk_gb=args.disk, iso=str(args.iso.expanduser().resolve()), firmware=str(args.firmware.expanduser().resolve()) if args.firmware else None, network=args.network, tpm=args.tpm, boot=args.boot))
+        if args.unattended and args.boot != "uefi":
+            raise ValueError("--unattended is for UEFI Windows installs")
+        record = manager.create(VMConfig(name=args.name, arch=args.arch, memory_mb=args.memory, cpus=args.cpus, disk_gb=args.disk, iso=str(args.iso.expanduser().resolve()), firmware=str(args.firmware.expanduser().resolve()) if args.firmware else None, network=args.network, tpm=args.tpm, boot=args.boot))
+        if args.unattended:
+            from . import media
+            password = args.password or os.environ.get("WINDOWS_TERMINAL_PASSWORD")
+            if not password:
+                import getpass
+                password = getpass.getpass(f"Password for Windows account {args.user!r}: ")
+            try:
+                xml = media.unattend_xml(args.arch, args.user, password, args.edition)
+                media.answer_iso(xml, manager.root / args.name / "answer.iso")
+            except BaseException:
+                shutil.rmtree(manager.root / args.name, ignore_errors=True)
+                raise
+            record["unattended"] = {"user": args.user, "edition": args.edition}
+        return record
     if args.command == "list":
         return manager.list()
     if args.command == "checkpoint":
@@ -98,7 +170,10 @@ def run(args):
     if args.command in {"status", "command"}:
         return getattr(manager, args.command)(args.vm)
     if args.command == "up":
+        blank = manager.status(args.vm)["state"] == "stopped" and manager.load(args.vm).get("iso") and manager.disk_is_blank(args.vm)
         result = manager.start(args.vm)
+        if blank and not fetched_media(manager.load(args.vm)["iso"]):
+            press_boot_key(Computer(manager.qmp_path(args.vm)))
         if args.view:
             from .viewer import view
             view(Computer(manager.qmp_path(args.vm)), args.vm, args.protocol, args.fps)

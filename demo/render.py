@@ -40,6 +40,15 @@ NAMED = {
     "brightgreen": (158, 206, 106), "brightyellow": (224, 175, 104), "brightblue": (122, 162, 247),
     "brightmagenta": (187, 154, 247), "brightcyan": (125, 207, 255), "brightwhite": (220, 225, 245),
 }
+PROFILES = {
+    "win11": ([
+        ("Fetch genuine Windows", "from Microsoft's CDN, every chunk integrity-checked"),
+        ("Boot it in the terminal", "real QEMU + Apple HVF, rendered as inline graphics"),
+        ("You drive", "keyboard + mouse go to the guest only"),
+        ("An agent drives", "same VM, nine computer-use tools over MCP"),
+        ("Detach", "Ctrl+] — the VM keeps running"),
+    ], "Guest: Windows 11 ARM64 build 26100.4349 (Windows PE + Setup), booted from Microsoft's own media."),
+}
 STEPS = [
     ("Create a VM", "from your own ISO. Private disk, no network."),
     ("Boot it in the terminal", "real QEMU, rendered as inline graphics"),
@@ -47,6 +56,7 @@ STEPS = [
     ("An agent drives", "same VM, nine computer-use tools over MCP"),
     ("Detach", "Ctrl+] — the VM keeps running"),
 ]
+NOTE = "Guest shown: ReactOS 0.4.15 (open-source, Windows-compatible). Bring your own Windows ISO for Windows 11."
 TOKEN = re.compile(rb"\x1b\[\?1049([hl])|\x1b\]1337;File=([^:\x07]*):([A-Za-z0-9+/=]*)\x07|\x1b_G[^\x1b]*\x1b\\|(\x1b\[2J)")
 
 
@@ -204,7 +214,7 @@ def base_layer(columns, rows):
     draw.text((PANEL_X, TERM_Y + 48), "A separate PC for your agent.\nRight inside your terminal.", font=font(SANS, 21), fill=(150, 160, 182), spacing=6)
     footer = font(SANS, 17)
     draw.text((TERM_X, HEIGHT - 52), "github.com/arjunkshah12345-hash/windows-terminal", font=footer, fill=(150, 160, 182))
-    note = "Guest shown: ReactOS 0.4.15 (open-source, Windows-compatible). Bring your own Windows ISO for Windows 11."
+    note = NOTE
     draw.text((WIDTH - 56 - draw.textlength(note, font=footer), HEIGHT - 52), note, font=footer, fill=(96, 106, 128))
     return base
 
@@ -283,6 +293,10 @@ def main():
     options.add_argument("--poster", type=Path)
     args = options.parse_args()
     header, operations, markers = load(args.directory)
+    global STEPS, NOTE
+    profile = next((m["name"] for m in markers if m["kind"] == "profile"), None)
+    if profile in PROFILES:
+        STEPS, NOTE = PROFILES[profile]
     end_marker = next((m["t"] for m in markers if m["kind"] == "end"), operations[-1][0])
     mapped, total = timeline(markers, end_marker)
     hold = 4.0
