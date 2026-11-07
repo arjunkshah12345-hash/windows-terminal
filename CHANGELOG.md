@@ -6,6 +6,8 @@
   SHA-1 verified, and build a bootable ISO with wimlib + xorriso.
 - `fetch --setup-only`: range-download only Windows PE + Setup (~0.56 GB of a 4.5 GB ESD) into a sparse
   file, verified chunk by chunk against the ESD integrity table.
+- `fetch` checks free disk space first (a full build peaks near 3x the ESD, ~14 GB) and suggests
+  `--setup-only` instead of filling the disk mid-download.
 - `init --unattended`: answer disc with autounattend.xml (local account, auto-logon, Compact OS, OOBE skips).
 - Boot order: disk first via `bootindex` on x86; on ARM, edk2's default order with PXE disabled (ArmVirt drops
   USB CDs it cannot match to a bootindex). Fetched ISOs need no "Press any key"; `up` presses it for other

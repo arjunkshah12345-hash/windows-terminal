@@ -1,5 +1,6 @@
 import hashlib
 import io
+import shutil
 import struct
 import tempfile
 import unittest
@@ -196,6 +197,34 @@ class Fat12Tests(unittest.TestCase):
             media.fat12_add_file(disk, "STARTUP NSH", b"y")
         with self.assertRaisesRegex(ValueError, "FAT12"):
             media.fat12_add_file(bytes(4096), "STARTUP NSH", b"x")
+
+
+class PreflightTests(unittest.TestCase):
+    ENTRY = {"name": "w.esd", "size": 4_000_000_000}
+
+    def test_full_fetch_counts_partial_download(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            fresh = media.space_needed(self.ENTRY, out)
+            with (out / "w.esd.part").open("wb") as stream:
+                stream.truncate(1_000_000_000)
+            self.assertEqual(fresh - media.space_needed(self.ENTRY, out), 1_000_000_000)
+            self.assertEqual(media.space_needed(self.ENTRY, out, setup_only=True), media.SETUP_ONLY_BYTES)
+
+    def test_check_space_refuses_with_hint(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch("windows_terminal.media.shutil.disk_usage", return_value=shutil._ntuple_diskusage(0, 0, 3_000_000_000)):
+            with self.assertRaisesRegex(RuntimeError, "--setup-only"):
+                media.check_space(self.ENTRY, Path(tmp))
+            media.check_space(self.ENTRY, Path(tmp), setup_only=True)
+
+    def test_missing_edition_lists_choices(self):
+        found = {"Windows Setup Media": 1, "Microsoft Windows PE (ARM64)": 2,
+                 "Microsoft Windows Setup (ARM64)": 3, "Windows 11 Home": 4, "Windows 11 Pro": 5}
+        with patch("windows_terminal.media._tool", return_value="tool"), \
+                patch("windows_terminal.media.images", return_value=found):
+            with self.assertRaisesRegex(ValueError, "Windows 11 Home, Windows 11 Pro"):
+                media.build_iso(Path("w.esd"), Path("out.iso"), "Windows 11 Education")
 
 
 class CliTests(unittest.TestCase):

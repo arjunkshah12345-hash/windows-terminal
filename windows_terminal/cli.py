@@ -121,6 +121,7 @@ def fetch_media(args):
     family = "Professional"  # consumer ESD: Home, Home Single Language, Pro
     entry = media.catalog(args.arch, args.language, family)
     say(f"Microsoft catalog: {entry['name']} ({entry['size'] / 1e9:.1f} GB, SHA-1 {entry['sha1'][:12]}…)")
+    media.check_space(entry, out, args.setup_only)
     esd = (media.download_setup_only(entry, out / (entry["name"] + ".setup"), say) if args.setup_only
            else media.download(entry, out / entry["name"], say))
     suffix = "setup" if args.setup_only else args.edition.lower().replace("windows ", "win").replace(" ", "-")

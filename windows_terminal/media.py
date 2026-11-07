@@ -254,6 +254,33 @@ def download_setup_only(entry: dict, destination: Path, progress: Progress = _qu
     return destination
 
 
+SETUP_ONLY_BYTES = int(2.5e9)  # ~0.6 GB of the ESD + ~0.9 GB staging + ~0.9 GB ISO
+
+
+def space_needed(entry: dict, out: Path, setup_only: bool = False) -> int:
+    """Bytes fetch will write: what is left to download, plus staging and the ISO.
+
+    A full build keeps the ESD while it stages ~1x its size and writes an ISO of
+    about the same size, so it peaks near 3x the ESD minus anything already on disk.
+    """
+    if setup_only:
+        return SETUP_ONLY_BYTES
+    have = 0
+    for candidate in (out / entry["name"], out / (entry["name"] + ".part")):
+        if candidate.is_file():
+            have = max(have, min(candidate.stat().st_size, entry["size"]))
+    return (entry["size"] - have) + 2 * entry["size"] + int(0.5e9)
+
+
+def check_space(entry: dict, out: Path, setup_only: bool = False) -> None:
+    need = space_needed(entry, out, setup_only)
+    free = shutil.disk_usage(out).free
+    if free < need:
+        hint = "" if setup_only else " Or try --setup-only (~2.5 GB) to boot Windows Setup without installing."
+        raise RuntimeError(f"Not enough disk space in {out}: fetch needs about {need / 1e9:.1f} GB "
+                           f"and {free / 1e9:.1f} GB is free. Free up space or pass --out on a bigger disk.{hint}")
+
+
 def _sha1(path: Path) -> str:
     digest = hashlib.sha1()
     with path.open("rb") as stream:
@@ -284,7 +311,7 @@ def build_iso(esd: Path, output: Path, image: str = "Windows 11 Pro", setup_only
         raise RuntimeError("This ESD does not contain Windows Setup media")
     if not setup_only and image not in found:
         editions = [name for name in found if name.startswith("Windows ")]
-        raise ValueError(f"{image!r} is not in this ESD; choose one of: {', '.join(n for n in editions if n not in needed)}")
+        raise ValueError(f"{image!r} is not in this ESD; choose one of: {', '.join(editions)}")
     stage = Path(tempfile.mkdtemp(prefix=".wt-iso-", dir=output.parent))
     try:
         progress("Extracting Windows Setup media")
