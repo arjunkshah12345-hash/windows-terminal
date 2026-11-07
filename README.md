@@ -2,11 +2,11 @@
 
 **A separate PC for your agent. Right inside your terminal.**
 
-![windows-terminal demo: a VM boots inside the terminal, a human clicks through it, then an agent opens Notepad over MCP](docs/demo.gif)
+![windows-terminal demo: genuine Windows 11 ARM64 is fetched from Microsoft, boots inside the terminal, a human clicks in it, then an agent opens a command prompt and Notepad over MCP](docs/demo.gif)
 
-<sub>Unedited terminal capture, rendered from a recorded session (`demo/`). Boot waits are time-lapsed and labelled.
-The guest shown is [ReactOS](https://reactos.org), an open-source Windows-compatible OS, because it can be freely
-redistributed. With your own Windows ISO the flow is the same. [Full-quality MP4](docs/demo.mp4).</sub>
+<sub>Unedited terminal capture, rendered from a recorded session (`demo/`). Download and boot waits are
+time-lapsed and labelled. The guest is **genuine Windows 11 ARM64** (build 26100.4349), fetched by the tool from
+Microsoft's own CDN; the demo boots its Windows PE + Setup environment. [Full-quality MP4](docs/demo.mp4).</sub>
 
 `windows-terminal` runs a real QEMU virtual machine and draws its screen in your terminal. Your keyboard and
 mouse go to the guest. Any MCP-capable agent can drive the **same** machine through nine computer-use tools,
@@ -14,14 +14,25 @@ without moving your host mouse, reading your clipboard, or touching your files. 
 of Windows, and it is not Microsoft's Windows Terminal app.
 
 ```sh
-windows-terminal init --iso ~/Downloads/Win11_ARM64.iso --tpm
-windows-terminal up --view          # Ctrl+] detaches; the VM keeps running
-windows-terminal mcp                # hand the same VM to your agent
+windows-terminal fetch                       # genuine Windows 11 from Microsoft → bootable ISO
+windows-terminal init --iso win11-*.iso --tpm --unattended
+windows-terminal up --view                   # installs hands-free; Ctrl+] detaches, the VM keeps running
+windows-terminal mcp                         # hand the same VM to your agent
 ```
 
 ## What works
 
-- Persistent named VMs, each with its own sparse disk, UEFI variables, and optional TPM 2.0.
+- **Real Windows, fetched for you.** `fetch` reads Microsoft's Media Creation Tool catalog, downloads the
+  official ESD from Microsoft's CDN (SHA-1 checked against the catalog), and rebuilds a bootable installation
+  ISO with wimlib + xorriso. Nothing comes from third-party mirrors.
+- **Hands-free installs.** `init --unattended` attaches a separate answer disc (`autounattend.xml`): it wipes
+  only the VM's own disk, installs with Compact OS, creates a local account with auto-logon, skips the
+  Microsoft-account and network screens, and keeps the machine awake for agents.
+- **No "Press any key to boot from CD".** Fetched ISOs boot with Microsoft's no-prompt loader. For your own
+  ISO, `up` presses the key for you, but only while the VM's disk is still blank.
+  On ARM, QEMU's firmware sometimes registers the USB CD after its UEFI shell and lands there; fetched ISOs
+  carry a `startup.nsh` in their EFI boot image that hands straight over to Windows Setup.
+- Persistent named VMs, each with its own sparse disk (TRIM shrinks it), UEFI variables, and optional TPM 2.0.
 - Legacy BIOS mode (`--boot bios`) for older x86 guests: Windows 7 and earlier, ReactOS.
 - Apple silicon acceleration (HVF), Linux KVM, and a TCG fallback for cross-architecture guests.
 - Kitty graphics in Kitty, Ghostty, and WezTerm; iTerm2 inline images; true-color half-blocks everywhere else
@@ -30,12 +41,43 @@ windows-terminal mcp                # hand the same VM to your agent
 - CLI screenshot, typing, shortcuts, clicks, pointer movement, and lifecycle commands.
 - Nine MCP computer-use tools. Several viewers and agents can share one VM; monitor access is serialized.
 - Offline checkpoints (disk, UEFI, and TPM together, verified with SHA256) that restore into a new VM.
-- None of these: host pointer movement, clipboard access, shared folders, public control ports, automatic
-  downloads, account sign-in, or Windows licensing bypasses.
+- None of these: host pointer movement, clipboard access, shared folders, public control ports, account
+  sign-in, or activation. Windows is installed unactivated with Microsoft's generic edition key.
 
-## Try it in two minutes, no Windows ISO needed
+## Get Windows
 
-ReactOS boots from a ~300 MB live CD. On Apple silicon it runs emulated (TCG), so allow 1–2 minutes to boot.
+```sh
+brew install wimlib xorriso          # Debian/Ubuntu: sudo apt install wimtools xorriso
+windows-terminal fetch               # ~4.5 GB download → ~4 GB ISO (Windows 11 Pro, your host's architecture)
+windows-terminal fetch --setup-only  # ~0.56 GB download → 0.9 GB ISO: boots real Windows PE + Setup, cannot install
+```
+
+`--setup-only` downloads only the byte ranges of Microsoft's ESD that hold Windows PE and Setup (the first
+three images, about an eighth of the file) into a sparse file. Every downloaded 10 MB chunk is checked
+against the ESD's own integrity table and wimlib re-verifies the SHA-1 of every extracted file. It is a
+quick, small way to boot genuine Windows and is what the demo uses. Options: `--arch`, `--language en-gb`,
+`--edition "Windows 11 Home"`, `--out DIR`, `--keep-download`.
+
+## What has been verified
+
+On an Apple silicon Mac (QEMU 11.1, HVF), recorded in the demo:
+
+- `fetch --setup-only` downloads and builds a bootable ISO; a fresh VM boots it to **Windows 11 Setup**
+  with no keypress.
+- Inside genuine Windows (build 26100.4349, ARM64): keyboard, mouse, Shift+F10 command prompt, `wmic`, and
+  Notepad, both from the viewer and from an agent over MCP.
+- Windows Setup finds the `--unattended` answer disc and runs its first-pass commands.
+
+**Not yet verified end to end:** a full installation to the desktop (needs ~20 GB of free disk, which the
+test machine did not have), and networking in installed Windows on Arm. ARM guests get a USB RNDIS NIC,
+because Windows on Arm has no e1000 driver; Windows PE has no driver for it at all. The full install path is
+built from standard Microsoft answer-file settings, but treat it as experimental until it has been run to
+completion. Reports welcome.
+
+## Try ReactOS in two minutes
+
+ReactOS, an open-source Windows-compatible OS, boots from a ~300 MB live CD. On Apple silicon it runs
+emulated (TCG), so allow 1–2 minutes to boot.
 
 ```sh
 curl -LO https://github.com/reactos/reactos/releases/download/0.4.15-release/ReactOS-0.4.15-release-1-gdbb43bbaeb2-x86-live.zip
@@ -50,10 +92,9 @@ Python 3.11+, QEMU, and a Windows installation ISO that matches the guest CPU.
 This runs on **macOS, Linux, or Linux inside WSL2**. Native Win32 hosting is not
 implemented; the controller uses Unix sockets and POSIX terminal APIs.
 
-For Windows 11, install `swtpm` and use `--tpm`. QEMU's firmware, CPU model, and
-your ISO must meet that Windows release's requirements. This is an early-stage
-project: an actual Windows installation has **not** been validated here. The
-live integration tests boot real QEMU firmware, not Windows.
+For Windows 11, install `swtpm` and use `--tpm` (`--unattended` also sets Windows Setup's documented
+LabConfig bypasses for TPM/Secure Boot checks). `fetch` needs `wimlib` and `xorriso`. See
+[What has been verified](#what-has-been-verified) for the current state of real Windows installs.
 
 ```sh
 # macOS
@@ -71,9 +112,13 @@ windows-terminal doctor
 
 ## Create and run
 
-Use your own ISO obtained from Microsoft. Windows is not bundled, downloaded, or
-activated by this tool. On Apple silicon, use a **Windows ARM64** ISO; on Intel/
-AMD, use x64. The architecture defaults to your host architecture.
+Use `windows-terminal fetch` or your own ISO from Microsoft. Windows is not bundled or activated by this
+tool. On Apple silicon, use a **Windows ARM64** ISO; on Intel/AMD, use x64. The architecture defaults to
+your host architecture.
+
+For a hands-free install, add `--unattended` (account `agent` by default; `--user`, `--password` or
+`$WINDOWS_TERMINAL_PASSWORD`, `--edition`). The password is stored in the VM's private `answer.iso` (mode 0600)
+as Windows Setup requires; use a throwaway password.
 
 ```sh
 windows-terminal init --iso ~/Downloads/Windows11_ARM64.iso --tpm
@@ -194,6 +239,9 @@ The bundled `skills/windows-terminal/SKILL.md` describes the computer-use loop.
 ## Commands
 
 ```text
+fetch                      Download genuine Windows 11 from Microsoft, build a bootable ISO
+  --setup-only            Only Windows PE + Setup (~0.56 GB download)
+  --arch / --language / --edition / --out / --keep-download
 init [NAME] --iso PATH     Create disk/config, never overwrite existing VMs
   --arch aarch64|x86_64    Guest architecture (host architecture by default)
   --memory 4096           Guest memory in MiB
@@ -203,6 +251,8 @@ init [NAME] --iso PATH     Create disk/config, never overwrite existing VMs
   --tpm                   TPM 2.0 via swtpm
   --network isolated|nat  Network policy, isolated by default
   --boot uefi|bios        bios = SeaBIOS + IDE for legacy x86 guests
+  --unattended            Hands-free install via an attached autounattend.xml disc
+    --user / --password / --edition
 up [--view]               Start; optionally attach viewer (accepts --protocol/--fps)
 view                      Attach to an already-running guest
   --protocol auto|kitty|iterm|blocks
@@ -265,7 +315,8 @@ terminal would, and encodes an MP4 with ffmpeg.
 
 ```sh
 pip install -e '.[demo]'   # adds pyte; ffmpeg must be on PATH
-python demo/record.py --iso ReactOS-0.4.15-release-1-gdbb43bbaeb2-x86-live.iso --out demo/out
+python demo/record.py --out demo/out                      # genuine Windows 11 ARM64 (fetches ~0.56 GB)
+python demo/record.py --guest reactos --iso ReactOS-*-live.iso --out demo/out
 python demo/render.py demo/out --output docs/demo.mp4 --poster docs/poster.png
 ```
 
@@ -282,7 +333,7 @@ virtual environment, then tests version reporting, host diagnostics, and MCP
 initialization/tool discovery from outside the checkout. It needs package-index
 access but never creates a VM. Successful artifacts and SHA256 checksums land in
 `dist/`; the temporary environment is removed automatically. Install the wheel
-with `python3 -m pip install dist/windows_terminal_vm-0.2.0-py3-none-any.whl`.
+with `python3 -m pip install dist/windows_terminal_vm-0.3.0-py3-none-any.whl`.
 
 The live suite boots disposable ARM and x86 QEMU firmware guests, tests framebuffer
 capture, keyboard/mouse input, MCP screenshots, terminal detach/restoration, and

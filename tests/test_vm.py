@@ -156,7 +156,7 @@ class VMTests(unittest.TestCase):
     def test_x86_command_is_headless_sata_and_isolated(self):
         self.create(arch="x86_64")
         command = self.manager.command("windows")
-        self.assertIn("ide-hd,drive=osdisk,bus=sata.0", command)
+        self.assertIn("ide-hd,drive=osdisk,bus=sata.0,bootindex=0", command)
         self.assertIn("e1000,netdev=net0", command)
         self.assertEqual(command[command.index("-vga") + 1], "std")
         self.assertEqual(command[command.index("-display") + 1], "none")
@@ -171,7 +171,8 @@ class VMTests(unittest.TestCase):
         command = self.manager.command("windows")
         self.assertIn("nvme,drive=osdisk,serial=WT0001", command)
         self.assertIn("ramfb", command)
-        self.assertIn("e1000,netdev=net0", command)
+        self.assertIn("usb-net,netdev=net0", command)
+        self.assertNotIn("e1000,netdev=net0", command)
         self.assertIn("usb-storage,drive=install", command)
 
     def test_acceleration_requires_matching_arch_and_access(self):
@@ -219,9 +220,21 @@ class VMTests(unittest.TestCase):
         self.assertIn("tpm-tis-device,tpmdev=tpm0,ppi=off", command)
 
     def test_boot_prefers_disk_over_installation_media(self):
-        self.create()
+        self.create(arch="x86_64")
         command = self.manager.command("windows")
-        self.assertEqual(command[command.index("-boot") + 1], "order=cd,menu=on")
+        self.assertNotIn("-boot", command)
+        disk = next(a for a in command if "drive=osdisk," in a and not a.startswith("if="))
+        media = next(a for a in command if "drive=install," in a and not a.startswith("if="))
+        self.assertIn("bootindex=0", disk)
+        self.assertIn("bootindex=1", media)
+
+    def test_arm_boot_order_avoids_bootindex_and_pxe(self):
+        # ArmVirt edk2 drops USB CDs it cannot match to a bootindex path.
+        self.create(arch="aarch64")
+        command = self.manager.command("windows")
+        self.assertNotIn("bootindex", " ".join(command))
+        self.assertIn("name=opt/org.tianocore/IPv4PXESupport,string=n", command)
+        self.assertIn("discard=unmap", next(a for a in command if "id=osdisk" in a))
 
     def test_installation_media_is_always_raw_not_format_probed(self):
         self.create()

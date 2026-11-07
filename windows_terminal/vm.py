@@ -282,21 +282,27 @@ class VMManager:
                    "-m", str(record["memory_mb"]), "-smp", str(record["cpus"]),
                    "-display", "none", "-monitor", "none", "-serial", "none",
                    "-qmp", f"unix:{self.qmp_path(name)},server=on,wait=off",
-                   "-boot", "order=cd,menu=on", "-rtc", "base=localtime"]
+                   "-rtc", "base=localtime"]
         for filename, readonly in () if bios else (("uefi-code.fd", True), ("uefi-vars.fd", False)):
             path = self._existing_file(directory / filename, "VM UEFI firmware")
             command += ["-drive", f"if=pflash,format=raw,readonly={'on' if readonly else 'off'},file={self._escape(path)}"]
         disk = self._existing_file(directory / "disk.qcow2", "VM disk")
-        command += ["-drive", f"if=none,id=osdisk,format=qcow2,file={self._escape(disk)}"]
+        # discard/detect-zeroes let guest TRIM shrink the qcow2 instead of only ever growing it.
+        command += ["-drive", f"if=none,id=osdisk,format=qcow2,discard=unmap,detect-zeroes=unmap,file={self._escape(disk)}"]
         if arch == "aarch64":
             command += ["-device", "nvme,drive=osdisk,serial=WT0001", "-device", "ramfb",
-                        "-device", "qemu-xhci", "-device", "e1000,netdev=net0"]
+                        "-device", "qemu-xhci", "-device", "usb-net,netdev=net0",
+                        # ArmVirt edk2 cannot translate bootindex paths for USB disks and would drop the CD,
+                        # so ARM relies on edk2's default order (NVMe before USB) and disables PXE delays.
+                        "-fw_cfg", "name=opt/org.tianocore/IPv4PXESupport,string=n",
+                        "-fw_cfg", "name=opt/org.tianocore/IPv6PXESupport,string=n"]
+            # Windows on Arm has no e1000 driver; its inbox RNDIS driver binds usb-net.
         elif bios:
             # Legacy guests (older Windows, ReactOS) expect i440FX IDE, UHCI USB and PS/2.
-            command += ["-device", "ide-hd,drive=osdisk,bus=ide.0", "-vga", "std",
+            command += ["-device", "ide-hd,drive=osdisk,bus=ide.0,bootindex=0", "-vga", "std",
                         "-usb", "-device", "e1000,netdev=net0"]
         else:
-            command += ["-device", "ich9-ahci,id=sata", "-device", "ide-hd,drive=osdisk,bus=sata.0",
+            command += ["-device", "ich9-ahci,id=sata", "-device", "ide-hd,drive=osdisk,bus=sata.0,bootindex=0",
                         "-vga", "std", "-device", "qemu-xhci", "-device", "e1000,netdev=net0"]
         command += ["-device", "usb-tablet", *(() if bios else ("-device", "usb-kbd")),
                     "-netdev", "user,id=net0" + (",restrict=on" if record.get("network", "isolated") == "isolated" else "")]
@@ -313,10 +319,24 @@ class VMManager:
             if arch == "aarch64":
                 command += ["-device", "usb-storage,drive=install"]
             elif bios:
-                command += ["-device", "ide-cd,drive=install,bus=ide.1"]
+                command += ["-device", "ide-cd,drive=install,bus=ide.1,bootindex=1"]
             else:
-                command += ["-device", "ide-cd,drive=install,bus=sata.1"]
+                command += ["-device", "ide-cd,drive=install,bus=sata.1,bootindex=1"]
+        answer = directory / "answer.iso"
+        if answer.is_file() and not bios:
+            # autounattend.xml on a second, non-bootable disc; Windows Setup scans removable media for it.
+            command += ["-drive", f"if=none,id=answer,format=raw,media=cdrom,readonly=on,file={self._escape(answer)}",
+                        "-device", "usb-storage,drive=answer" if arch == "aarch64" else "ide-cd,drive=answer,bus=sata.2"]
         return command
+
+    def disk_is_blank(self, name: str) -> bool:
+        """True until the guest has written to its disk, i.e. before an OS is installed."""
+        disk = self._directory(name) / "disk.qcow2"
+        result = subprocess.run([self._executable("qemu-img"), "info", "--output=json", "-U", str(disk)],
+                                capture_output=True, text=True, check=False)
+        if result.returncode:
+            return False
+        return json.loads(result.stdout).get("actual-size", 1 << 30) < 4 * 1024 * 1024
 
     @staticmethod
     def _escape(path: Path) -> str:

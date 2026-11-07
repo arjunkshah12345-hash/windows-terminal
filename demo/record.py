@@ -134,27 +134,112 @@ class MCPClient:
         self.process.wait(timeout=5)
 
 
+def glide_click(session, computer, x, y, label):
+    """Move the guest pointer to (x, y) with SGR mouse reports, like a hand would, then click."""
+    columns, rows = image_geometry(computer.screenshot(), COLUMNS - 1, ROWS - 3)
+    cell = lambda px, py: (1 + px * columns // 800, 2 + py * rows // 600)
+    for index in range(8):
+        column, row = cell(x + 60 - 60 * index // 7, y + 40 - 40 * index // 7)
+        session.send(f"\x1b[<35;{column};{row}M".encode())
+        time.sleep(0.06)
+    column, row = cell(x, y)
+    session.mark("input", label=label)
+    session.send(f"\x1b[<0;{column};{row}M".encode())
+    time.sleep(0.12)
+    session.send(f"\x1b[<0;{column};{row}m".encode())
+
+
+def win11(session, manager, environment, workspace):
+    """Genuine Windows 11 ARM64: fetch from Microsoft, boot, drive by hand, then by an agent."""
+    session.mark("profile", name="win11")
+    time.sleep(1.2)
+    session.mark("step", index=0)
+    session.type("windows-terminal fetch --setup-only | jq -c '{iso, verified}'")
+    time.sleep(3)
+    session.mark("speed", factor=10, label="downloading + building ISO")
+    wait_until(lambda: list(workspace.glob("win11-*-setup.iso")), 900, 1)
+    time.sleep(2.5)
+    session.mark("speed", factor=1)
+    time.sleep(1.5)
+
+    session.mark("step", index=1)
+    session.type("windows-terminal init win11 --iso win11-*-setup.iso --memory 2048 --cpus 2 | jq -c '{name, arch, network}'")
+    time.sleep(2.0)
+    session.type("windows-terminal up --view --fps 10")
+    wait_until(lambda: manager.status("win11")["state"] == "running", 15, 0.2)
+    computer = Computer(manager.qmp_path("win11"))
+    time.sleep(3)
+    session.mark("speed", factor=8, label="booting Windows")
+    wait_until(lambda: near(computer.screenshot().getpixel((400, 300)), (255, 255, 255), 6)
+               and near(computer.screenshot().getpixel((90, 520)), (255, 255, 255), 6), 300, 1.5)
+    time.sleep(2)
+    session.mark("speed", factor=1)
+    time.sleep(2)
+
+    session.mark("step", index=2)
+    glide_click(session, computer, 97, 453, "click → guest")  # untick "Hide drivers…" in real Windows Setup
+    time.sleep(2.2)
+    glide_click(session, computer, 97, 453, "click → guest")
+    time.sleep(2)
+
+    session.mark("step", index=3)
+    agent = MCPClient(environment, session)
+    time.sleep(1.0)
+    agent.call("screenshot", "screenshot()  →  800×600 PNG")
+    time.sleep(1.4)
+    agent.call("key", 'key("shift+f10")', chord="shift+f10")
+    time.sleep(3.5)
+    agent.call("type", 'type("ver")', text="ver\n")
+    time.sleep(1.5)
+    agent.call("type", 'type("wmic os get …")', text="wmic os get caption,osarchitecture,version\n")
+    time.sleep(4)
+    agent.call("type", 'type("start notepad")', text="start notepad\n")
+    time.sleep(3.5)
+    agent.call("type", 'type("Hi! I\'m an agent…")', text="Hi! I'm an agent.\nThis is a real Windows 11 PC, all mine.\nYour Mac's mouse and keyboard stay yours.")
+    time.sleep(3.5)
+    agent.close()
+
+    session.mark("step", index=4)
+    session.mark("input", label="Ctrl+] → detach")
+    session.send(b"\x1d")
+    time.sleep(1.2)
+    session.type("windows-terminal status | jq -c '{name, state, pid}'")
+    time.sleep(2.0)
+    session.type("windows-terminal down --force | jq -c '{name, state}'")
+    time.sleep(2.5)
+    session.mark("end")
+    time.sleep(0.5)
+
+
 def main():
     options = argparse.ArgumentParser()
-    options.add_argument("--iso", type=Path, required=True)
+    options.add_argument("--guest", choices=["win11", "reactos"], default="win11",
+                         help="win11: fetch genuine Windows 11 ARM64 boot media from Microsoft; reactos: needs --iso")
+    options.add_argument("--iso", type=Path)
     options.add_argument("--out", type=Path, default=ROOT / "demo/out")
     args = options.parse_args()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
-    iso = args.iso.resolve()
+    if args.guest == "reactos" and not args.iso:
+        options.error("--guest reactos needs --iso ReactOS-Live.iso")
     workspace = Path(tempfile.mkdtemp(prefix="wt-rec-", dir="/tmp"))
-    (workspace / "ReactOS-Live.iso").symlink_to(iso)
+    if args.iso:
+        (workspace / "ReactOS-Live.iso").symlink_to(args.iso.resolve())
     vm_root = workspace / "vms"
     environment = {
         "PATH": f"{ROOT / '.venv/bin'}:/opt/homebrew/bin:/usr/bin:/bin",
         "HOME": str(workspace), "TERM": "xterm-256color", "TERM_PROGRAM": "iTerm.app", "LANG": "en_US.UTF-8",
         "PS1": "%F{#7aa2f7}~/demo%f %F{#9ece6a}❯%f ", "WINDOWS_TERMINAL_ROOT": str(vm_root),
-        "WINDOWS_TERMINAL_VM": "work", "DEMO_CWD": str(workspace),
+        "WINDOWS_TERMINAL_VM": "win11" if args.guest == "win11" else "work", "DEMO_CWD": str(workspace),
     }
     session = Session(environment, out)
     manager = VMManager(vm_root)
     computer = None
+    name = environment["WINDOWS_TERMINAL_VM"]
     try:
+        if args.guest == "win11":
+            win11(session, manager, environment, workspace)
+            return
         time.sleep(1.2)
         session.mark("step", index=0)
         session.type("windows-terminal init work --iso ReactOS-Live.iso --arch x86_64 --boot bios \\")
@@ -224,14 +309,14 @@ def main():
         time.sleep(0.5)
     finally:
         try:
-            if manager.status("work")["state"] != "stopped":
-                manager.stop("work", force=True)
+            if (manager.root / name).is_dir() and manager.status(name)["state"] != "stopped":
+                manager.stop(name, force=True)
         except Exception as error:
             print("cleanup:", error, file=sys.stderr)
         session.save()
         os.kill(session.pid, 9)
         shutil.rmtree(workspace, ignore_errors=True)
-    print(f"Recorded {session.now():.1f}s → {out / 'session.cast'}")
+        print(f"Recorded {session.now():.1f}s → {out / 'session.cast'}")
 
 
 if __name__ == "__main__":
