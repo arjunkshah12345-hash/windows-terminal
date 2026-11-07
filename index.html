@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>windows-terminal: a separate PC for your agent, inside your terminal</title>
+<meta name="description" content="Genuine Windows 11 in a real QEMU VM, drawn inside your terminal. Your agent drives it over MCP; your Mac's mouse and keyboard stay yours. Open source, MIT.">
+<meta property="og:title" content="windows-terminal: a separate PC for your agent">
+<meta property="og:description" content="Genuine Windows 11 in a real VM, drawn inside your terminal. Your agent drives it over MCP; your mouse stays yours.">
+<meta property="og:image" content="https://arjunkshah12345-hash.github.io/windows-terminal/og.jpg">
+<meta property="og:url" content="https://arjunkshah12345-hash.github.io/windows-terminal/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://arjunkshah12345-hash.github.io/windows-terminal/og.jpg">
+<style>
+  :root { --blue: #0067c0; --ink: #111; --light: #f3f3f3; --yellow: #ffd54a; --term: #0c0c0c;
+    --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--sans); color: var(--ink); background: var(--light); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+  header.top { background: var(--blue); color: #fff; }
+  nav { display: flex; justify-content: space-between; align-items: center; padding: 22px 0; }
+  .name { font-family: var(--mono); font-weight: 600; font-size: 19px; text-decoration: none; }
+  nav .links a { margin-left: 26px; font-weight: 600; font-size: 15px; text-decoration: none; opacity: .9; }
+  nav .links a:hover { opacity: 1; text-decoration: underline; }
+  .hero { padding: 56px 0 72px; }
+  h1 { font-size: clamp(44px, 7vw, 88px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.02; max-width: 15ch; }
+  h1 em { font-style: normal; color: var(--yellow); }
+  .lede { margin-top: 24px; font-size: clamp(18px, 2vw, 22px); max-width: 44ch; opacity: .92; }
+  .cta { margin-top: 34px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .cmd { font-family: var(--mono); background: var(--term); color: #fff; padding: 15px 20px; border-radius: 10px; font-size: 16px; display: inline-flex; gap: 14px; align-items: center; }
+  .cmd b { color: var(--yellow); font-weight: 600; }
+  .cmd button { font: 600 13px var(--sans); background: #2b2b2b; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  .btn { font-weight: 700; font-size: 16px; text-decoration: none; padding: 15px 22px; border-radius: 10px; background: #fff; color: var(--blue); }
+  .film { margin-top: 56px; border-radius: 14px; overflow: hidden; background: #000; box-shadow: 0 30px 70px rgba(0,0,0,.35); aspect-ratio: 16 / 9; }
+  .film video { display: block; width: 100%; height: 100%; }
+  section { padding: 88px 0; }
+  h2 { font-size: clamp(32px, 4.4vw, 52px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.08; max-width: 20ch; }
+  h2 span { color: var(--blue); }
+  .steps { margin-top: 48px; display: grid; gap: 0; border-top: 2px solid var(--ink); }
+  .step { display: grid; grid-template-columns: 220px 1fr; gap: 28px; padding: 28px 0; border-bottom: 1px solid #cfcfcf; align-items: start; }
+  .step h3 { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
+  .step p { font-size: 18px; max-width: 60ch; }
+  .step code, p code, li code { font-family: var(--mono); font-size: .9em; background: #e4e4e4; padding: 2px 6px; border-radius: 5px; }
+  .dark { background: var(--term); color: #eaeaea; }
+  .dark h2 span { color: var(--yellow); }
+  pre { margin-top: 36px; font-family: var(--mono); font-size: 15.5px; line-height: 1.75; background: #1a1a1a; border-radius: 12px; padding: 26px 28px; overflow-x: auto; color: #f0f0f0; }
+  pre .c { color: #8a8a8a; }
+  pre .p { color: var(--yellow); }
+  .note { margin-top: 18px; font-size: 15px; color: #a9a9a9; max-width: 70ch; }
+  .two { margin-top: 44px; display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
+  .two h3 { font-size: 21px; font-weight: 800; margin-bottom: 14px; }
+  ul.plain { list-style: none; }
+  ul.plain li { padding: 11px 0; border-bottom: 1px solid #d6d6d6; font-size: 17px; }
+  .demo { margin-top: 40px; border-radius: 12px; overflow: hidden; background: #000; aspect-ratio: 16 / 9; }
+  .demo video { display: block; width: 100%; height: 100%; }
+  footer { background: var(--blue); color: #fff; padding: 64px 0; }
+  footer .big { font-family: var(--mono); font-weight: 600; font-size: clamp(28px, 4vw, 44px); }
+  footer p { margin-top: 12px; opacity: .9; }
+  footer a { font-weight: 700; }
+  @media (max-width: 760px) {
+    .step { grid-template-columns: 1fr; gap: 8px; }
+    .two { grid-template-columns: 1fr; gap: 32px; }
+    nav .links a:not(.gh) { display: none; }
+    .cmd { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <nav>
+      <a class="name" href="#">windows-terminal</a>
+      <div class="links"><a href="#how">How it works</a><a href="#start">Get started</a><a class="gh" href="https://github.com/arjunkshah12345-hash/windows-terminal">GitHub</a></div>
+    </nav>
+    <div class="hero">
+      <h1>A <em>real</em> Windows PC for your agent. Inside your terminal.</h1>
+      <p class="lede">Genuine Windows 11 in a QEMU virtual machine, drawn right in your terminal. You can click around in it. Your agent drives the same machine over MCP, and your own mouse and keyboard stay yours.</p>
+      <div class="cta">
+        <span class="cmd"><b>$</b><span id="install">pipx install git+https://github.com/arjunkshah12345-hash/windows-terminal</span><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('install').textContent);this.textContent='Copied'">Copy</button></span>
+        <a class="btn" href="https://github.com/arjunkshah12345-hash/windows-terminal">Star on GitHub</a>
+      </div>
+      <div class="film"><video src="launch.mp4" poster="launch-poster.jpg" controls playsinline preload="metadata"></video></div>
+    </div>
+  </div>
+</header>
+
+<section id="how">
+  <div class="wrap">
+    <h2>Four commands from nothing to <span>a PC your agent can use</span></h2>
+    <div class="steps">
+      <div class="step"><h3>Fetch it</h3><p><code>windows-terminal fetch</code> downloads genuine Windows 11 from Microsoft's own CDN, checks it against the SHA-1 in Microsoft's catalog, and builds a bootable ISO. No third-party mirrors.</p></div>
+      <div class="step"><h3>Boot it</h3><p><code>init</code> creates a named VM with its own disk, UEFI and optional TPM 2.0. <code>up --view</code> boots it with Apple silicon (HVF) or KVM acceleration and draws the screen inline: Kitty graphics, iTerm2 images, or true-colour blocks anywhere else.</p></div>
+      <div class="step"><h3>Click it</h3><p>Your keyboard and mouse go to the guest: typing, clicks, dragging, scrolling. <code>Ctrl+]</code> detaches and the VM keeps running.</p></div>
+      <div class="step"><h3>Hand it over</h3><p><code>windows-terminal mcp</code> gives any MCP-capable agent nine computer-use tools on the same machine: screenshot, click, type, key, scroll and more. It never moves your host pointer, reads your clipboard or touches your files.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="start" class="dark">
+  <div class="wrap">
+    <h2>Get started <span>on a Mac or Linux box</span></h2>
+<pre><span class="c"># QEMU, a TPM emulator, and the tools fetch uses to build the ISO</span>
+<span class="p">$</span> brew install qemu swtpm wimlib xorriso
+<span class="p">$</span> pipx install git+https://github.com/arjunkshah12345-hash/windows-terminal
+
+<span class="p">$</span> windows-terminal fetch                         <span class="c"># genuine Windows 11 from Microsoft, ~4.5 GB</span>
+<span class="p">$</span> windows-terminal init --iso win11-*.iso --tpm --unattended
+<span class="p">$</span> windows-terminal up --view                     <span class="c"># Ctrl+] detaches, the VM keeps running</span>
+<span class="p">$</span> windows-terminal mcp                           <span class="c"># hand the same VM to your agent</span></pre>
+    <p class="note">Debian/Ubuntu: <code>sudo apt install qemu-system-x86 qemu-utils ovmf swtpm wimtools xorriso</code>. A full install needs about 20 GB free. Want a quick look first? <code>fetch --setup-only</code> downloads about 0.56 GB and boots real Windows PE and Setup. Windows is installed unactivated with Microsoft's generic edition key.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What's real, <span>and what isn't verified yet</span></h2>
+    <div class="two">
+      <div>
+        <h3>Shown working</h3>
+        <ul class="plain">
+          <li>Genuine Windows 11 ARM64, fetched and booted to Setup with no keypress</li>
+          <li>Keyboard, mouse, command prompt and Notepad, from you and from an agent over MCP</li>
+          <li>Persistent named VMs, TPM 2.0, offline checkpoints</li>
+          <li>Live tests on ARM and x86 QEMU in CI</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Not verified yet</h3>
+        <ul class="plain">
+          <li>A full unattended install all the way to the desktop</li>
+          <li>Networking inside installed Windows on Arm</li>
+        </ul>
+        <p class="note" style="color:#555">The demo below boots Windows PE + Setup. It is one unedited terminal session with the download and boot waits time-lapsed and labelled.</p>
+      </div>
+    </div>
+    <div class="demo"><video src="demo.mp4" poster="poster.png" controls playsinline preload="none"></video></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="big">windows-terminal</div>
+    <p>Open source under the MIT license. Not affiliated with Microsoft or its Windows Terminal app. <a href="https://github.com/arjunkshah12345-hash/windows-terminal">github.com/arjunkshah12345-hash/windows-terminal</a></p>
+  </div>
+</footer>
+</body>
+</html>
